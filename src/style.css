@@ -59,12 +59,14 @@ body {
 }
 
 .dropzone:hover,
-.dropzone--active {
+.dropzone--active,
+.dropzone:focus-visible {
   border-color: #b0b0b0;
   background: rgba(255, 255, 255, 0.03);
   box-shadow:
     0 0 24px rgba(255, 255, 255, 0.06),
     inset 0 0 24px rgba(255, 255, 255, 0.02);
+  outline: none;
 }
 
 .dropzone__icon {

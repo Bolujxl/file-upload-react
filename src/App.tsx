@@ -1,6 +1,15 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, type DragEvent, type FormEvent, type KeyboardEvent } from 'react'
 
-function formatSize(bytes) {
+interface FileItem {
+  id: string
+  name: string
+  size: number
+  type: string
+  progress: number
+  file: File
+}
+
+function formatSize(bytes: number): string {
   if (bytes === 0) return '0 B'
   const units = ['B', 'KB', 'MB', 'GB']
   const i = Math.floor(Math.log(bytes) / Math.log(1024))
@@ -8,13 +17,13 @@ function formatSize(bytes) {
 }
 
 export default function App() {
-  const [files, setFiles] = useState([])
+  const [files, setFiles] = useState<FileItem[]>([])
   const [uploading, setUploading] = useState(false)
   const [dragover, setDragover] = useState(false)
-  const inputRef = useRef(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
-  const addFiles = useCallback((fileList) => {
-    const incoming = Array.from(fileList).map((file) => ({
+  const addFiles = useCallback((fileList: FileList) => {
+    const incoming: FileItem[] = Array.from(fileList).map((file) => ({
       id: crypto.randomUUID(),
       name: file.name,
       size: file.size,
@@ -25,34 +34,39 @@ export default function App() {
     setFiles((prev) => [...prev, ...incoming])
   }, [])
 
-  const handleDrop = useCallback((e) => {
+  const handleDrop = useCallback((e: DragEvent<HTMLDivElement>) => {
     e.preventDefault()
     setDragover(false)
     if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files)
   }, [addFiles])
 
-  const handleDragOver = useCallback((e) => {
+  const handleDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
     e.preventDefault()
     setDragover(true)
   }, [])
 
-  const handleDragLeave = useCallback((e) => {
+  const handleDragLeave = useCallback((e: DragEvent<HTMLDivElement>) => {
     e.preventDefault()
-    setDragover(false)
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      setDragover(false)
+    }
   }, [])
 
-  const handleBrowse = () => inputRef.current?.click()
+  const handleBrowse = useCallback(() => {
+    inputRef.current?.click()
+  }, [])
 
-  const handleChange = (e) => {
-    if (e.target.files.length) addFiles(e.target.files)
-    e.target.value = ''
-  }
+  const handleChange = useCallback((e: FormEvent<HTMLInputElement>) => {
+    const target = e.currentTarget
+    if (target.files?.length) addFiles(target.files)
+    target.value = ''
+  }, [addFiles])
 
-  const removeFile = (id) => {
+  const removeFile = useCallback((id: string) => {
     setFiles((prev) => prev.filter((f) => f.id !== id))
-  }
+  }, [])
 
-  const uploadFiles = async () => {
+  const uploadFiles = useCallback(async () => {
     if (!files.length) return
     setUploading(true)
 
@@ -66,7 +80,14 @@ export default function App() {
     }
 
     setUploading(false)
-  }
+  }, [files])
+
+  const handleKeyDown = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      inputRef.current?.click()
+    }
+  }, [])
 
   return (
     <div className="wrapper">
@@ -75,9 +96,12 @@ export default function App() {
 
         <div
           className={`dropzone${dragover ? ' dropzone--active' : ''}`}
+          tabIndex={0}
+          role="button"
           onDrop={handleDrop}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
+          onKeyDown={handleKeyDown}
           onClick={handleBrowse}
         >
           <div className="dropzone__icon">
@@ -136,6 +160,7 @@ export default function App() {
                       e.stopPropagation()
                       removeFile(f.id)
                     }}
+                    aria-label={`Remove ${f.name}`}
                     title="Remove"
                   >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
