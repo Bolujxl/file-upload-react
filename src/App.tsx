@@ -10,6 +10,7 @@ interface FileItem {
 }
 
 function formatSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return '0 B'
   if (bytes === 0) return '0 B'
   const units = ['B', 'KB', 'MB', 'GB']
   const i = Math.floor(Math.log(bytes) / Math.log(1024))
@@ -20,19 +21,44 @@ export default function App() {
   const [files, setFiles] = useState<FileItem[]>([])
   const [uploading, setUploading] = useState(false)
   const [dragover, setDragover] = useState(false)
+  const [message, setMessage] = useState<{ text: string; type: 'error' | 'success' } | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const addFiles = useCallback((fileList: FileList) => {
-    const incoming: FileItem[] = Array.from(fileList).map((file) => ({
-      id: crypto.randomUUID(),
-      name: file.name,
-      size: file.size,
-      type: file.type || 'Unknown',
-      progress: 0,
-      file,
-    }))
-    setFiles((prev) => [...prev, ...incoming])
-  }, [])
+    const MAX_SIZE = 50 * 1024 * 1024 // 50MB limit
+    const existingNames = new Set(files.map(f => f.name))
+    let error = ''
+
+    const incoming: FileItem[] = Array.from(fileList)
+      .filter(file => {
+        if (existingNames.has(file.name)) {
+          error = 'Some files were already added'
+          return false
+        }
+        if (file.size > MAX_SIZE) {
+          error = 'Some files are too large (max 50MB)'
+          return false
+        }
+        return true
+      })
+      .map((file) => ({
+        id: crypto.randomUUID(),
+        name: file.name,
+        size: file.size,
+        type: file.type || 'Unknown',
+        progress: 0,
+        file,
+      }))
+
+    if (error) {
+      setMessage({ text: error, type: 'error' })
+      setTimeout(() => setMessage(null), 3000)
+    }
+
+    if (incoming.length > 0) {
+      setFiles((prev) => [...prev, ...incoming])
+    }
+  }, [files])
 
   const handleDrop = useCallback((e: DragEvent<HTMLDivElement>) => {
     e.preventDefault()
@@ -47,7 +73,8 @@ export default function App() {
 
   const handleDragLeave = useCallback((e: DragEvent<HTMLDivElement>) => {
     e.preventDefault()
-    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+    const related = e.relatedTarget
+    if (related instanceof Node && !e.currentTarget.contains(related)) {
       setDragover(false)
     }
   }, [])
@@ -66,20 +93,31 @@ export default function App() {
     setFiles((prev) => prev.filter((f) => f.id !== id))
   }, [])
 
+  const handleRemove = useCallback((e: React.MouseEvent, id: string) => {
+    e.stopPropagation()
+    removeFile(id)
+  }, [removeFile])
+
   const uploadFiles = useCallback(async () => {
-    if (!files.length) return
+    const pending = files.filter(f => f.progress < 100)
+    if (!pending.length) return
+
     setUploading(true)
-
-    for (const f of files) {
-      for (let p = 0; p <= 100; p += 10) {
-        await new Promise((r) => setTimeout(r, 80))
-        setFiles((prev) =>
-          prev.map((item) => (item.id === f.id ? { ...item, progress: p } : item))
-        )
-      }
+    try {
+      await Promise.all(pending.map(async (f) => {
+        for (let p = 10; p <= 100; p += 10) {
+          // Randomized speed for staggered progress
+          await new Promise((r) => setTimeout(r, Math.random() * 400 + 100))
+          setFiles((prev) =>
+            prev.map((item) => (item.id === f.id ? { ...item, progress: p } : item))
+          )
+        }
+      }))
+    } catch (err) {
+      console.error('Upload simulation failed', err)
+    } finally {
+      setUploading(false)
     }
-
-    setUploading(false)
   }, [files])
 
   const handleKeyDown = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
@@ -117,6 +155,12 @@ export default function App() {
           </p>
         </div>
 
+        {message && (
+          <div className={`message message--${message.type}`}>
+            {message.text}
+          </div>
+        )}
+
         <input
           ref={inputRef}
           type="file"
@@ -137,7 +181,14 @@ export default function App() {
                 </div>
 
                 {f.progress > 0 && f.progress < 100 && (
-                  <div className="file-item__progress">
+                  <div
+                    className="file-item__progress"
+                    role="progressbar"
+                    aria-valuenow={f.progress}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label={`Uploading ${f.name}`}
+                  >
                     <div
                       className="file-item__bar"
                       style={{ width: `${f.progress}%` }}
@@ -153,13 +204,10 @@ export default function App() {
                   </span>
                 )}
 
-                {!uploading && f.progress === 0 && (
+                {!uploading && f.progress < 100 && (
                   <button
                     className="file-item__remove"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      removeFile(f.id)
-                    }}
+                    onClick={(e) => handleRemove(e, f.id)}
                     aria-label={`Remove ${f.name}`}
                     title="Remove"
                   >
@@ -175,13 +223,27 @@ export default function App() {
         )}
 
         {files.length > 0 && (
-          <button
-            className="upload-btn"
-            onClick={uploadFiles}
-            disabled={uploading}
-          >
-            {uploading ? 'uploading...' : `upload ${files.length} file${files.length > 1 ? 's' : ''}`}
-          </button>
+          <div className="actions">
+            {files.some(f => f.progress < 100) && (
+              <button
+                className="upload-btn"
+                onClick={uploadFiles}
+                disabled={uploading}
+              >
+                {uploading ? 'uploading...' : `upload ${files.filter(f => f.progress === 0).length} file${files.filter(f => f.progress === 0).length !== 1 ? 's' : ''}`}
+              </button>
+            )}
+
+            {!uploading && files.some(f => f.progress === 100) && (
+              <button
+                className="clear-btn"
+                onClick={() => setFiles([])}
+                title="Remove all files"
+              >
+                clear all
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>
